@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>REPO-48</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#f5f5f5; margin:0; padding:20px; }
+    .login, .app { max-width: 1100px; margin:auto; background:#fff; padding:20px; border-radius:8px; }
+    h2 { margin-top:0; }
+    input, button { padding:8px; margin:5px 0; }
+    table { width:100%; border-collapse: collapse; margin-top:15px; }
+    th, td { border:1px solid #ccc; padding:6px; }
+    th { background:#eee; }
+    .hidden { display:none; }
+    .top-bar { display:flex; justify-content:space-between; align-items:center; }
+    .user-list button { margin:2px; }
+    .active-user { background:#007bff; color:#fff; }
+    .admin-box { background:#fafafa; padding:10px; border:1px solid #ddd; margin-bottom:10px; }
+    .recent { color:red; }
+    td[contenteditable]:not(.editable) { background:#f0f0f0; }
+    .deleteBtn { background:red; color:#fff; border:none; padding:2px 6px; cursor:pointer; border-radius:3px; }
+  </style>
+</head>
+<body>
+
+<div class="login" id="loginBox">
+  <h2>Είσοδος</h2>
+  <input type="number" id="pinInput" placeholder="PIN" />
+  <button onclick="login()">Είσοδος</button>
+  <p id="loginMsg"></p>
+</div>
+
+<div class="app hidden" id="appBox">
+  <div class="top-bar">
+    <h2 id="userTitle"></h2>
+    <button onclick="logout()">Έξοδος</button>
+  </div>
+
+  <div id="adminPanel" class="hidden">
+    <div class="admin-box">
+      <h3>Καταχώρηση Νέου Υπαλλήλου</h3>
+      <input id="newUserName" placeholder="Όνομα Υπαλλήλου" />
+      <button onclick="addUser()">Καταχώρηση Υπαλλήλου</button>
+    </div>
+
+    <div class="admin-box">
+      <h3>Σελίδες Υπαλλήλων</h3>
+      <div class="user-list" id="userList"></div>
+    </div>
+    <hr>
+  </div>
+
+  <button onclick="changePin()">Αλλαγή PIN</button>
+  <button id="saveBtn" onclick="saveData()">Καταχώρηση</button>
+  <button onclick="addRow()">+</button>
+  <button id="saveAllBtn" onclick="saveForAll()" class="hidden">Καταχώρηση για όλους</button>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Α/Α</th>
+        <th>ΑΙΤΙΟΛΟΓΙΑ</th>
+        <th>ΗΜΕΡΟΜΗΝΙΑ ΑΠΟΔΟΣΗΣ</th>
+        <th>ΗΜΕΡΟΜΗΝΙΑ ΕΞΟΦΛΗΣΗΣ</th>
+        <th>ΠΑΡΑΤΗΡΗΣΕΙΣ</th>
+        <th>Διαγραφή</th>
+      </tr>
+    </thead>
+    <tbody id="tableBody"></tbody>
+  </table>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyBzJktYHMl6XdjON-PP5PlKrZVAFkOnoBM",
+  authDomain: "repo-48.firebaseapp.com",
+  databaseURL: "https://repo-48-default-rtdb.firebaseio.com",
+  projectId: "repo-48",
+  storageBucket: "repo-48.firebasestorage.app",
+  messagingSenderId: "926757913178",
+  appId: "1:926757913178:web:b91db0ca1177dbb912ce63"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+let currentUser = null;
+let viewedUserId = null;
+const RED_TIME = 48 * 60 * 60 * 1000;
+
+const defaultUsers = {
+  1:{name:'Τεχνικός Διευθυντής',pin:'1111'},
+  2:{name:'Προϊστάμενος Τμήματος',pin:'2222'},
+  3:{name:'Πατελούδης',pin:'3333'},
+  4:{name:'Αθανασόπουλος',pin:'4444'},
+  5:{name:'Αμπατζής',pin:'5555'},
+  6:{name:'Ασκόπουλος',pin:'6666'},
+  7:{name:'Παπαδάκης',pin:'7777'},
+  8:{name:'Παπασωτηρίου',pin:'8888'},
+  9:{name:'Παστρουμάς',pin:'9999'}
+};
+
+db.ref('users').once('value', snap => {
+  if(!snap.exists()) db.ref('users').set(defaultUsers);
+});
+
+function login(){
+  const pin = document.getElementById('pinInput').value;
+  db.ref('users').once('value', snap => {
+    let found = null;
+    snap.forEach(u => { if(u.val().pin === pin) found = {id:u.key,...u.val()}; });
+    if(!found){ document.getElementById('loginMsg').innerText='Λάθος PIN'; return; }
+
+    currentUser = found;
+    viewedUserId = found.id;
+
+    document.getElementById('loginBox').classList.add('hidden');
+    document.getElementById('appBox').classList.remove('hidden');
+    document.getElementById('userTitle').innerText = found.name + ' (Χρήστης ' + found.id + ')';
+
+    document.getElementById('saveBtn').style.display = (currentUser.id <= 2) ? 'inline-block' : 'none';
+    document.getElementById('saveAllBtn').style.display = (currentUser.id <= 2) ? 'inline-block' : 'none';
+
+    if(found.id <= 2) loadAdminPanel();
+    loadTable();
+  });
+}
+
+function logout(){ location.reload(); }
+
+function loadAdminPanel(){
+  document.getElementById('adminPanel').classList.remove('hidden');
+  refreshUserButtons();
+}
+
+function refreshUserButtons(){
+  db.ref('users').once('value', snap => {
+    const ul = document.getElementById('userList');
+    ul.innerHTML='';
+    snap.forEach(u => {
+      const id = u.key;
+      const b = document.createElement('button');
+      b.innerText = `${u.val().name} (${id})`;
+      b.onclick = () => selectUser(id, b);
+      if(id == viewedUserId) b.classList.add('active-user');
+      ul.appendChild(b);
+    });
+  });
+}
+
+function selectUser(uid, button){
+  viewedUserId = uid;
+  document.querySelectorAll('.user-list button').forEach(b=>b.classList.remove('active-user'));
+  button.classList.add('active-user');
+  loadTable();
+}
+
+function loadTable(){
+  const body = document.getElementById('tableBody');
+  body.innerHTML='';
+  db.ref('data/'+viewedUserId).once('value', snap => {
+    if(!snap.exists()) return;
+    snap.forEach(r => {
+      if(isNaN(parseInt(r.key))) {
+        db.ref('data/'+viewedUserId+'/'+r.key).remove();
+        return;
+      }
+      createRow(r.key, r.val());
+    });
+  });
+}
+
+function isRecent(ts){ return Date.now() - ts < RED_TIME; }
+
+function createRow(key, data={}){
+  const recent = data.ts && isRecent(data.ts);
+  const cls = recent ? 'recent' : '';
+  const body = document.getElementById('tableBody');
+  const editableClass = (currentUser.id <= 2) ? 'editable' : '';
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td class="${cls}">${key}</td>
+    <td class="${cls} ${editableClass}" contenteditable>${data.a||''}</td>
+    <td class="${cls} ${editableClass}" contenteditable>${data.b||''}</td>
+    <td class="${cls} ${editableClass}" contenteditable>${data.c||''}</td>
+    <td class="${cls} ${editableClass}" contenteditable>${data.d||''}</td>
+    <td>${currentUser.id <=2 ? `<button class='deleteBtn' onclick='deleteRow(${key})'>X</button>` : ''}</td>`;
+  body.appendChild(tr);
+}
+
+function deleteRow(rowId){
+  if(currentUser.id > 2){ alert('Δεν έχεις δικαίωμα διαγραφής'); return; }
+  if(confirm('Θέλεις σίγουρα να διαγράψεις αυτή τη γραμμή;')){
+    db.ref('data/'+viewedUserId+'/'+rowId).remove();
+    loadTable();
+  }
+}
+
+function addRow(){
+  if(currentUser.id > 2){ alert('Δεν έχεις δικαίωμα να προσθέσεις γραμμές'); return; }
+  const body = document.getElementById('tableBody');
+  const id = body.children.length + 1;
+  createRow(id, { ts: Date.now() });
+}
+
+function saveData(){
+  if(currentUser.id > 2){ alert('Δεν έχεις δικαίωμα καταχώρησης'); return; }
+  const rows = document.querySelectorAll('#tableBody tr');
+  rows.forEach(r => {
+    const tds = r.querySelectorAll('td');
+    db.ref('data/'+viewedUserId+'/'+tds[0].innerText).set({
+      a:tds[1].innerText,
+      b:tds[2].innerText,
+      c:tds[3].innerText,
+      d:tds[4].innerText,
+      ts: Date.now(),
+      by: currentUser.id
+    });
+  });
+  loadTable();
+  alert('Αποθηκεύτηκε');
+}
+
+function saveForAll(){
+  if(currentUser.id > 2){ alert('Δεν έχεις δικαίωμα'); return; }
+  const comment = prompt('Γράψε το σχόλιο για όλους:','');
+  if(comment===null) return;
+
+  db.ref('users').once('value', snap => {
+    snap.forEach(u => {
+      const uid = u.key;
+      db.ref('data/'+uid).once('value', snapData => {
+        let nextId = 1;
+        if(snapData.exists()){
+          const keys = Object.keys(snapData.val());
+          const nums = keys.map(k=>parseInt(k)).filter(n=>!isNaN(n));
+          if(nums.length>0) nextId = Math.max(...nums) + 1;
+        }
+        db.ref('data/'+uid+'/'+nextId).set({
+          a: comment,
+          b: '',
+          c: '',
+          d: '',
+          ts: Date.now(),
+          by: currentUser.id
+        });
+      });
+    });
+  });
+  alert('Καταχώρηση για όλους ολοκληρώθηκε');
+  loadTable();
+}
+
+function changePin(){
+  if(viewedUserId != currentUser.id && currentUser.id > 2){ alert('Δεν μπορείς'); return; }
+  const np = prompt('Νέο PIN');
+  if(!np) return;
+  db.ref('users/'+viewedUserId+'/pin').set(np);
+  alert('Το PIN άλλαξε');
+}
+
+function addUser(){
+  const name = document.getElementById('newUserName').value.trim();
+  if(!name) return alert('Γράψε όνομα');
+  db.ref('users').once('value', snap => {
+    const newId = snap.numChildren() + 1;
+    if(newId > 99) return alert('Μέγιστο 99');
+    const pin = ''+newId+newId;
+    db.ref('users/'+newId).set({name,pin});
+    document.getElementById('newUserName').value='';
+    alert(`Προστέθηκε ${name} με PIN ${pin}`);
+    refreshUserButtons();
+  });
+}
+</script>
+</body>
+</html>
